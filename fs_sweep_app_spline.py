@@ -25,7 +25,7 @@ BOTTOM_AXIS_PX = 60  # Bottom margin reserved for x-axis title/ticks (px); also 
 LEFT_MARGIN_PX = 60  # Left margin (px); room for y-axis title and tick labels.
 RIGHT_MARGIN_PX = 20  # Right margin (px); small breathing room to avoid clipping.
 LEGEND_ROW_HEIGHT_FACTOR = 1.6  # legend row height ~= legend_font_size * factor
-LEGEND_PADDING_PX = 25  # Extra padding (px) below legend to avoid clipping in exports.
+LEGEND_PADDING_PX = 40  # Extra padding (px) below legend to avoid clipping in exports.
 # ---- Style settings (single source of truth) ----
 # Use Plotly layout styling (not CSS) so on-page and exported PNGs match.
 STYLE = {
