@@ -43,7 +43,7 @@ STYLE = {
 }
 
 AUTO_WIDTH_ESTIMATE_PX = 950  # Estimate width when Plotly auto-sizes (used for legend row estimation only).
-WEB_LEGEND_MAX_HEIGHT_PX = 500  # Cap legend reserved area on-page to avoid huge gaps between charts.
+WEB_LEGEND_MAX_HEIGHT_PX = 1000  # Cap legend reserved area on-page to avoid huge gaps between charts.
 DEFAULT_SPLINE_SMOOTHING = 1.0  # Default Plotly spline smoothing when spline mode is enabled.
 EXPORT_IMAGE_SCALE = 4  # PNG scale factor for both modebar and "Full Legend" export.
 WEB_LEGEND_EXTRA_PAD_PX = 20  # Extra breathing room to avoid clipping the last legend row on-page.
