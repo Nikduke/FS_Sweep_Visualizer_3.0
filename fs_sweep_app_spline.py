@@ -25,7 +25,7 @@ BOTTOM_AXIS_PX = 60  # Bottom margin reserved for x-axis title/ticks (px); also 
 LEFT_MARGIN_PX = 60  # Left margin (px); room for y-axis title and tick labels.
 RIGHT_MARGIN_PX = 20  # Right margin (px); small breathing room to avoid clipping.
 LEGEND_ROW_HEIGHT_FACTOR = 1.6  # legend row height ~= legend_font_size * factor
-LEGEND_PADDING_PX = 40  # Extra padding (px) below legend to avoid clipping in exports.
+LEGEND_PADDING_PX = 18  # Extra padding (px) below legend to avoid clipping in exports.
 # ---- Style settings (single source of truth) ----
 # Use Plotly layout styling (not CSS) so on-page and exported PNGs match.
 STYLE = {
@@ -43,9 +43,10 @@ STYLE = {
 }
 
 AUTO_WIDTH_ESTIMATE_PX = 950  # Estimate width when Plotly auto-sizes (used for legend row estimation only).
-WEB_LEGEND_MAX_HEIGHT_PX = 500  # Cap legend reserved area on-page to avoid huge gaps between charts.
+WEB_LEGEND_MAX_HEIGHT_PX = 300  # Cap legend reserved area on-page to avoid huge gaps between charts.
 DEFAULT_SPLINE_SMOOTHING = 1.0  # Default Plotly spline smoothing when spline mode is enabled.
 EXPORT_IMAGE_SCALE = 4  # PNG scale factor for both modebar and "Full Legend" export.
+WEB_LEGEND_EXTRA_PAD_PX = 12  # Extra breathing room to avoid clipping the last legend row on-page.
 
 # Debug flag (code-only). When True, prints the latest relayout payload and stored zoom.
 DEBUG_ZOOM = False
@@ -61,6 +62,7 @@ def plotly_relayout_listener(
     plot_count: int = 3,
     debounce_ms: int = 120,
     nonce: int = 0,
+    reset_token: int = 0,
 ) -> Optional[Dict[str, object]]:
     # Client-side zoom persistence: binds to Plotly charts and stores axis ranges
     # in browser localStorage. Returns None (no Python roundtrip on zoom).
@@ -69,6 +71,7 @@ def plotly_relayout_listener(
         plot_count=int(plot_count),
         debounce_ms=int(debounce_ms),
         nonce=int(nonce),
+        reset_token=int(reset_token),
         key=f"plotly_relayout_listener:{data_id}",
         default=None,
     )
@@ -83,6 +86,11 @@ def _reset_case_filter_state() -> None:
                 del st.session_state[k]
             except Exception:
                 pass
+
+
+def _note_upload_change() -> None:
+    # Called by st.file_uploader(on_change=...): used to trigger filter+zoom reset on any upload action.
+    st.session_state["upload_nonce"] = int(st.session_state.get("upload_nonce", 0)) + 1
 
 
 def _clamp_int(val: int, lo: int, hi: int) -> int:
@@ -526,7 +534,7 @@ def apply_common_layout(
     )
     est_width_px = int(figure_width_px) if not use_auto_width else int(AUTO_WIDTH_ESTIMATE_PX)
     legend_h_full = _estimate_legend_height_px(int(n_traces), est_width_px, int(legend_entrywidth))
-    legend_h = min(int(WEB_LEGEND_MAX_HEIGHT_PX), int(legend_h_full))
+    legend_h = min(int(WEB_LEGEND_MAX_HEIGHT_PX), int(legend_h_full) + int(WEB_LEGEND_EXTRA_PAD_PX))
     total_height = int(plot_height) + int(TOP_MARGIN_PX) + int(bottom_axis_px) + int(legend_h)
     legend_y = -float(bottom_axis_px) / float(max(1, int(plot_height)))
 
@@ -861,7 +869,13 @@ def main():
     # Data source
     default_path = "FS_sweep.xlsx"
     st.sidebar.header("Data Source")
-    up = st.sidebar.file_uploader("Upload Excel", type=["xlsx"], help="If empty, loads 'FS_sweep.xlsx' from this folder.")
+    up = st.sidebar.file_uploader(
+        "Upload Excel",
+        type=["xlsx"],
+        key="xlsx_uploader",
+        on_change=_note_upload_change,
+        help="If empty, loads 'FS_sweep.xlsx' from this folder.",
+    )
     data_id = "unknown"
     try:
         if up is not None:
@@ -884,10 +898,15 @@ def main():
         st.error(f"Failed to load Excel: {e}")
         st.stop()
 
-    # If the loaded file changed, reset case filters so the new dataset starts from defaults.
+    # Reset case-part/location filters on:
+    # - any upload action (even if the same file is uploaded again)
+    # - a change of the effective loaded dataset (data_id)
+    last_upload_handled = int(st.session_state.get("upload_nonce_handled", 0))
+    upload_nonce = int(st.session_state.get("upload_nonce", 0))
     prev_data_id = st.session_state.get("active_data_id")
-    if prev_data_id != data_id:
+    if (upload_nonce != last_upload_handled) or (prev_data_id != data_id):
         _reset_case_filter_state()
+        st.session_state["upload_nonce_handled"] = upload_nonce
         st.session_state["active_data_id"] = data_id
 
     # Controls
@@ -1012,6 +1031,7 @@ def main():
         plot_count=len(plot_order),
         debounce_ms=150,
         nonce=int(st.session_state[bind_nonce_key]),
+        reset_token=int(upload_nonce),
     )
 
     # Build plots
