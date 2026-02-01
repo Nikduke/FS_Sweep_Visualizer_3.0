@@ -20,6 +20,7 @@ let latestArgs = null;
 let debounceMs = 120;
 let lastDataId = null;
 let saveTimersByKey = new Map();
+let lastResetToken = null;
 
 function nowMs() {
   return Date.now ? Date.now() : new Date().getTime();
@@ -255,6 +256,28 @@ window.addEventListener("message", (event) => {
     if (lastDataId !== newDataId) {
       lastDataId = newDataId;
       saveTimersByKey = new Map();
+    }
+  } catch (e) {}
+
+  // If Python indicates an upload reset, clear stored zoom for this data_id so charts start autoscaled.
+  try {
+    const resetTok = Number(latestArgs.reset_token || 0);
+    const dataId = String(latestArgs.data_id || "");
+    if (lastResetToken !== resetTok) {
+      lastResetToken = resetTok;
+      if (dataId) {
+        const prefix = `fsSweepZoom:${dataId}:`;
+        const toDelete = [];
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const k = window.localStorage.key(i);
+          if (k && k.startsWith(prefix)) toDelete.push(k);
+        }
+        for (const k of toDelete) {
+          try {
+            window.localStorage.removeItem(k);
+          } catch (e2) {}
+        }
+      }
     }
   } catch (e) {}
   try {
