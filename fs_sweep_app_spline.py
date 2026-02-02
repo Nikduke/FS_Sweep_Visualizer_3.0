@@ -161,7 +161,7 @@ def _shade_hex(base_hex: str, position: float) -> str:
     return _rgb_to_hex(_mix_rgb(base_rgb, (0, 0, 0), t=(-p) * 0.25))
 
 
-def build_clustered_case_colors(cases: List[str]) -> Dict[str, str]:
+def build_clustered_case_colors(cases: List[str], hue_part_override: Optional[int] = None) -> Dict[str, str]:
     """
     Assign colors so related cases cluster by hue, with lighter/darker shades inside each cluster.
 
@@ -184,16 +184,24 @@ def build_clustered_case_colors(cases: List[str]) -> Dict[str, str]:
     # Normalize parts (pad with "")
     parts_norm = [p + [""] * (max_parts - len(p)) for p in split_parts]
 
-    # Pick "hue part" as the most varying part (ties => earlier part).
+    # Pick "hue part":
+    # - If hue_part_override is provided and valid, use it.
+    # - Otherwise, use the most varying part (ties => earlier part).
     uniq_counts = [len(set(row[i] for row in parts_norm)) for i in range(max_parts)]
-    varying = [i for i, n in enumerate(uniq_counts) if n > 1]
-    if not varying:
-        hue_part = 0
-        shade_part = None
-    else:
-        hue_part = sorted(varying, key=lambda i: (-uniq_counts[i], i))[0]
+    if hue_part_override is not None and 0 <= int(hue_part_override) < int(max_parts):
+        hue_part = int(hue_part_override)
+        varying = [i for i, n in enumerate(uniq_counts) if n > 1]
         rest = [i for i in varying if i != hue_part]
         shade_part = sorted(rest, key=lambda i: (-uniq_counts[i], i))[0] if rest else None
+    else:
+        varying = [i for i, n in enumerate(uniq_counts) if n > 1]
+        if not varying:
+            hue_part = 0
+            shade_part = None
+        else:
+            hue_part = sorted(varying, key=lambda i: (-uniq_counts[i], i))[0]
+            rest = [i for i in varying if i != hue_part]
+            shade_part = sorted(rest, key=lambda i: (-uniq_counts[i], i))[0] if rest else None
 
     # Use a combined palette so we have enough distinct hues if there are many groups.
     palette = []
@@ -234,8 +242,9 @@ def build_clustered_case_colors(cases: List[str]) -> Dict[str, str]:
 
 
 @st.cache_data(show_spinner=False)
-def cached_clustered_case_colors(cases: Tuple[str, ...]) -> Dict[str, str]:
-    return build_clustered_case_colors(list(cases))
+def cached_clustered_case_colors(cases: Tuple[str, ...], hue_part_override: int) -> Dict[str, str]:
+    # hue_part_override: -1 => auto; otherwise 0-based case-part index.
+    return build_clustered_case_colors(list(cases), None if int(hue_part_override) < 0 else int(hue_part_override))
 
 
 @st.cache_data(show_spinner=False)
@@ -748,10 +757,11 @@ def _render_client_png_download(
           for (const tr of data2) {{
             const name = tr && tr.name ? String(tr.name) : "";
             if (!name) continue;
+            // Prefer the actual trace styling (so export always matches on-page plot).
             const color =
-              (tr.meta && tr.meta.legend_color) ? tr.meta.legend_color :
               (tr.line && tr.line.color) ? tr.line.color :
               (tr.marker && tr.marker.color) ? tr.marker.color :
+              (tr.meta && tr.meta.legend_color) ? tr.meta.legend_color :
               "#444";
             legendItems.push({{name, color}});
           }}
@@ -951,6 +961,25 @@ def main():
             key="spline_smoothing",
         )
 
+    # Prepare cases list early so we can offer a "color by case part" control before Case Filters.
+    df_r = data.get(seq[0])
+    df_x = data.get(seq[1])
+    if df_r is None and df_x is None:
+        st.error(f"Missing sheets for sequence '{seq_label}' ({seq[0]}/{seq[1]}).")
+        st.stop()
+
+    all_cases = sorted(list({*list_case_columns(df_r), *list_case_columns(df_x)}))
+    _parts_matrix, _part_labels = split_case_parts(all_cases)
+    part_count = max(0, len(_part_labels) - 1) if _part_labels and _part_labels[-1] == "Location" else max(0, len(_part_labels))
+    color_part_options = ["Auto"] + [f"Case part {i}" for i in range(1, part_count + 1)]
+    color_by_part_label = st.sidebar.selectbox(
+        "Color by (case part)",
+        options=color_part_options,
+        index=0,
+        help="Keeps case colors stable across filters; choose which case part drives the color grouping.",
+    )
+    hue_part_override = -1 if color_by_part_label == "Auto" else int(color_by_part_label.split()[-1]) - 1
+
     st.sidebar.header("Show plots")
     show_plot_x = st.sidebar.checkbox("X", value=True)
     show_plot_r = st.sidebar.checkbox("R", value=False)
@@ -979,11 +1008,6 @@ def main():
     }
 
     # Cases / filters
-    df_r = data.get(seq[0])
-    df_x = data.get(seq[1])
-    if df_r is None and df_x is None:
-        st.error(f"Missing sheets for sequence '{seq_label}' ({seq[0]}/{seq[1]}).")
-        st.stop()
     if (show_plot_r or show_plot_xr) and df_r is None:
         st.error(f"Sheet '{seq[0]}' is missing, but R and/or X/R is enabled.")
         st.stop()
@@ -991,7 +1015,6 @@ def main():
         st.error(f"Sheet '{seq[1]}' is missing, but X and/or X/R is enabled.")
         st.stop()
 
-    all_cases = sorted(list({*list_case_columns(df_r), *list_case_columns(df_x)}))
     filtered_cases, part_labels = build_filters_for_case_parts(all_cases)
     if not filtered_cases:
         st.warning("No cases after filtering. Adjust filters.")
@@ -1019,7 +1042,10 @@ def main():
         if legend_entrywidth >= int(usable_w * 0.95):
             legend_entrywidth = usable_w
 
-    case_colors = cached_clustered_case_colors(tuple(filtered_cases))
+    # Stable colors: generate per-file mapping from all cases (not just filtered cases),
+    # and then look up colors for the currently filtered set.
+    all_case_colors = cached_clustered_case_colors(tuple(all_cases), int(hue_part_override))
+    case_colors = {c: all_case_colors.get(c, "#1f77b4") for c in filtered_cases}
 
     # Harmonic decorations
     show_harmonics = st.sidebar.checkbox("Show harmonic lines", value=True)
