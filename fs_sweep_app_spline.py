@@ -91,6 +91,17 @@ def _reset_case_filter_state() -> None:
 def _note_upload_change() -> None:
     # Called by st.file_uploader(on_change=...): used to trigger filter+zoom reset on any upload action.
     st.session_state["upload_nonce"] = int(st.session_state.get("upload_nonce", 0)) + 1
+    up = st.session_state.get("xlsx_uploader")
+    if up is None:
+        st.session_state.pop("uploaded_file_sha1_10", None)
+        st.session_state.pop("uploaded_file_name", None)
+        return
+    try:
+        st.session_state["uploaded_file_sha1_10"] = hashlib.sha1(up.getvalue()).hexdigest()[:10]
+        st.session_state["uploaded_file_name"] = getattr(up, "name", None)
+    except Exception:
+        st.session_state.pop("uploaded_file_sha1_10", None)
+        st.session_state.pop("uploaded_file_name", None)
 
 
 def _clamp_int(val: int, lo: int, hi: int) -> int:
@@ -881,7 +892,8 @@ def main():
         if up is not None:
             data = load_fs_sweep_xlsx(up)
             try:
-                data_id = hashlib.sha1(up.getvalue()).hexdigest()[:10]
+                cached = st.session_state.get("uploaded_file_sha1_10")
+                data_id = str(cached) if cached else hashlib.sha1(up.getvalue()).hexdigest()[:10]
             except Exception:
                 data_id = f"upload:{getattr(up, 'name', 'file')}"
         elif os.path.exists(default_path):
