@@ -21,6 +21,9 @@ let debounceMs = 120;
 let lastDataId = null;
 let saveTimersByKey = new Map();
 let lastResetToken = null;
+let bindTries = 80;
+let bindIntervalMs = 100;
+let ignoreAutorangeMs = 1200;
 
 function nowMs() {
   return Date.now ? Date.now() : new Date().getTime();
@@ -165,6 +168,10 @@ function bindOne(gd, idx, dataId) {
     }
   } catch (e) {}
 
+  try {
+    gd.__fsBindTimeMs = nowMs();
+  } catch (e) {}
+
   const handler = (evt) => {
     try {
       if (gd.__fsApplyingZoom) return;
@@ -192,6 +199,18 @@ function bindOne(gd, idx, dataId) {
       ) {
         return;
       }
+
+      // During Streamlit reruns, Plotly may emit an initial autorange relayout on mount.
+      // Ignore autorange-only events shortly after binding so we don't clear saved zoom unintentionally.
+      try {
+        const boundAt = Number(gd.__fsBindTimeMs || 0);
+        const age = nowMs() - boundAt;
+        const autorangeOnly =
+          (payload.xautorange === true || payload.yautorange === true) &&
+          payload.x0 === undefined &&
+          payload.y0 === undefined;
+        if (autorangeOnly && age >= 0 && age < Number(ignoreAutorangeMs || 0)) return;
+      } catch (e) {}
 
       const key = storageKey(dataId, idx);
       const existingRaw = safeLocalStorageGet(key);
@@ -240,7 +259,7 @@ function kickRebindLoop() {
   (function tick() {
     syncBindings();
     tries += 1;
-    if (tries < 80) setTimeout(tick, 100);
+    if (tries < Number(bindTries || 0)) setTimeout(tick, Number(bindIntervalMs || 0));
   })();
 }
 
@@ -251,6 +270,9 @@ window.addEventListener("message", (event) => {
   if (!data || data.type !== "streamlit:render") return;
   latestArgs = data.args || {};
   debounceMs = Number(latestArgs.debounce_ms || 120);
+  bindTries = Number(latestArgs.bind_tries || 80);
+  bindIntervalMs = Number(latestArgs.bind_interval_ms || 100);
+  ignoreAutorangeMs = Number(latestArgs.ignore_autorange_ms || 1200);
   try {
     const newDataId = String(latestArgs.data_id || "");
     if (lastDataId !== newDataId) {
