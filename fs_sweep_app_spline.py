@@ -412,15 +412,34 @@ def _checkbox_key_map(col_key: str, options_disp: Tuple[str, ...]) -> Dict[str, 
     return keys
 
 
-def build_filters_for_case_parts(all_cases: List[str]) -> Tuple[List[str], List[str]]:
+def build_filters_for_case_parts(all_cases: List[str]) -> Tuple[List[str], List[str], int]:
     st.sidebar.header("Case Filters")
     if not all_cases:
-        return [], []
+        return [], [], -1
     parts_matrix, part_labels = split_case_parts(all_cases)
     if not part_labels:
-        return all_cases, []
+        return all_cases, [], -1
 
     reset_all = st.sidebar.button("Reset all filters", key="case_filters_reset_all")
+
+    # Color grouping control lives inside Case Filters (under Reset), and must not reset on new file load.
+    # Only case selector states (case_part_*) are reset.
+    part_count = max(0, len(part_labels) - 1) if part_labels and part_labels[-1] == "Location" else max(0, len(part_labels))
+    color_part_options = ["Auto"] + [f"Case part {i}" for i in range(1, part_count + 1)]
+    st.sidebar.markdown("Color by (case part)")
+    prev_color_by = st.session_state.get("color_by_case_part", "Auto")
+    if isinstance(prev_color_by, str) and prev_color_by not in color_part_options:
+        st.session_state["color_by_case_part"] = "Auto"
+    color_by_part_label = st.sidebar.selectbox(
+        "Color by (case part)",
+        options=color_part_options,
+        key="color_by_case_part",
+        label_visibility="collapsed",
+        help="Keeps case colors stable across filters; choose which case part drives the color grouping.",
+    )
+    st.sidebar.markdown("---")
+    hue_part_override = -1 if color_by_part_label == "Auto" else int(color_by_part_label.split()[-1]) - 1
+
     keep = np.ones(len(all_cases), dtype=bool)
     parts_arr = np.array(parts_matrix, dtype=object)  # shape=(n_cases, n_parts)
     for i, label in enumerate(part_labels):
@@ -475,7 +494,7 @@ def build_filters_for_case_parts(all_cases: List[str]) -> Tuple[List[str], List[
         if len(selected_raw) == 0:
             keep &= False
     filtered = [c for c, k in zip(all_cases, keep) if k]
-    return filtered, part_labels
+    return filtered, part_labels, int(hue_part_override)
 
 
 def compute_common_n_range(f_series: List[pd.Series], f_base: float) -> Tuple[float, float]:
@@ -897,6 +916,7 @@ def main():
         on_change=_note_upload_change,
         help="If empty, loads 'FS_sweep.xlsx' from this folder.",
     )
+    st.sidebar.markdown("---")
     data_id = "unknown"
     try:
         if up is not None:
@@ -961,7 +981,9 @@ def main():
             key="spline_smoothing",
         )
 
-    # Prepare cases list early so we can offer a "color by case part" control before Case Filters.
+    st.sidebar.markdown("---")
+
+    # Prepare cases list early so the Case Filters section can offer a "color by case part" control.
     df_r = data.get(seq[0])
     df_x = data.get(seq[1])
     if df_r is None and df_x is None:
@@ -969,16 +991,6 @@ def main():
         st.stop()
 
     all_cases = sorted(list({*list_case_columns(df_r), *list_case_columns(df_x)}))
-    _parts_matrix, _part_labels = split_case_parts(all_cases)
-    part_count = max(0, len(_part_labels) - 1) if _part_labels and _part_labels[-1] == "Location" else max(0, len(_part_labels))
-    color_part_options = ["Auto"] + [f"Case part {i}" for i in range(1, part_count + 1)]
-    color_by_part_label = st.sidebar.selectbox(
-        "Color by (case part)",
-        options=color_part_options,
-        index=0,
-        help="Keeps case colors stable across filters; choose which case part drives the color grouping.",
-    )
-    hue_part_override = -1 if color_by_part_label == "Auto" else int(color_by_part_label.split()[-1]) - 1
 
     st.sidebar.header("Show plots")
     show_plot_x = st.sidebar.checkbox("X", value=True)
@@ -987,6 +999,7 @@ def main():
     if not (show_plot_x or show_plot_r or show_plot_xr):
         st.warning("Select at least one plot to display (X, R, or X/R).")
         st.stop()
+    st.sidebar.markdown("---")
 
     # Legend/Export controls
     st.sidebar.header("Legend & Export")
@@ -998,6 +1011,7 @@ def main():
     # Keep the download buttons visually within the "Legend & Export" section,
     # but fill their contents later once figures are built.
     download_area = st.sidebar.container()
+    st.sidebar.markdown("---")
 
     download_config = {
         "toImageButtonOptions": {
@@ -1015,7 +1029,7 @@ def main():
         st.error(f"Sheet '{seq[1]}' is missing, but X and/or X/R is enabled.")
         st.stop()
 
-    filtered_cases, part_labels = build_filters_for_case_parts(all_cases)
+    filtered_cases, part_labels, hue_part_override = build_filters_for_case_parts(all_cases)
     if not filtered_cases:
         st.warning("No cases after filtering. Adjust filters.")
         st.stop()
@@ -1048,8 +1062,10 @@ def main():
     case_colors = {c: all_case_colors.get(c, "#1f77b4") for c in filtered_cases}
 
     # Harmonic decorations
+    st.sidebar.header("Harmonics")
     show_harmonics = st.sidebar.checkbox("Show harmonic lines", value=True)
     bin_width_hz = st.sidebar.number_input("Bin width (Hz)", min_value=0.0, value=0.0, step=1.0, help="0 disables tolerance bands")
+    st.sidebar.markdown("---")
 
     # Client-side zoom persistence: bind to the 3 Streamlit Plotly charts and store axis ranges
     # in the browser (localStorage). No Streamlit rerun is triggered by zooming.
