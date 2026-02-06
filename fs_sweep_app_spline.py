@@ -1062,6 +1062,7 @@ def main():
     case_colors = {c: all_case_colors.get(c, "#1f77b4") for c in filtered_cases}
 
     # Harmonic decorations
+    st.sidebar.markdown("---")
     st.sidebar.header("Harmonics")
     show_harmonics = st.sidebar.checkbox("Show harmonic lines", value=True)
     bin_width_hz = st.sidebar.number_input("Bin width (Hz)", min_value=0.0, value=0.0, step=1.0, help="0 disables tolerance bands")
