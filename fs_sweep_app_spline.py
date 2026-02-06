@@ -17,36 +17,90 @@ from plotly.basedatatypes import BaseTraceType
 # ---- Page config ----
 st.set_page_config(page_title="FS Sweep Visualizer (Spline)", layout="wide")
 
-# ---- Layout constants ----
-# NOTE: Keep the bottom-legend layout; axis overlap is handled by axis title standoff.
-DEFAULT_FIGURE_WIDTH_PX = 1400  # Default figure width (px) when auto-width is disabled.
-TOP_MARGIN_PX = 40  # Top margin (px); room for title/toolbar while keeping plot-area height stable.
-BOTTOM_AXIS_PX = 60  # Bottom margin reserved for x-axis title/ticks (px); also defines plot-to-legend vertical gap.
-LEFT_MARGIN_PX = 60  # Left margin (px); room for y-axis title and tick labels.
-RIGHT_MARGIN_PX = 20  # Right margin (px); small breathing room to avoid clipping.
-LEGEND_ROW_HEIGHT_FACTOR = 2  # legend row height ~= legend_font_size * factor
-LEGEND_PADDING_PX = 18  # Extra padding (px) below legend to avoid clipping in exports.
-# ---- Style settings (single source of truth) ----
-# Use Plotly layout styling (not CSS) so on-page and exported PNGs match.
+# =============================================================================
+# Settings (single place to tune defaults)
+#
+# Preference: use named constants grouped by purpose (lowest code churn and most
+# readable in a single-file Streamlit app). Keep `STYLE` as a dict because it
+# maps directly to Plotly layout fields.
+# =============================================================================
+
+# ---- Style (applies to on-page AND exports) ----
 STYLE = {
     "font_family": "Open Sans, verdana, arial, sans-serif",
     "font_color": "#000000",
     "base_font_size_px": 14,
     "tick_font_size_px": 14,
     "axis_title_font_size_px": 16,
-    # Space between x tick labels and the x-axis title (px). Set to None to use auto heuristic.
-    "xaxis_title_standoff_px": None,
-    # Space between y tick labels and the y-axis title (px). Set to None to use auto heuristic.
-    "yaxis_title_standoff_px": None,
     "legend_font_size_px": 14,
     "bold_axis_titles": True,
+    # Space between tick labels and axis title (px). Set to None to use auto heuristic.
+    "xaxis_title_standoff_px": None,
+    "yaxis_title_standoff_px": None,
 }
 
-AUTO_WIDTH_ESTIMATE_PX = 950  # Estimate width when Plotly auto-sizes (used for legend row estimation only).
-WEB_LEGEND_MAX_HEIGHT_PX = 1000  # Cap legend reserved area on-page to avoid huge gaps between charts.
-DEFAULT_SPLINE_SMOOTHING = 1.0  # Default Plotly spline smoothing when spline mode is enabled.
-EXPORT_IMAGE_SCALE = 4  # PNG scale factor for both modebar and "Full Legend" export.
-WEB_LEGEND_EXTRA_PAD_PX = 20  # Extra breathing room to avoid clipping the last legend row on-page.
+# ---- Layout (web view) ----
+# NOTE: Keep the bottom legend layout; axis overlap is handled by title standoff + margins.
+DEFAULT_FIGURE_WIDTH_PX = 1400
+TOP_MARGIN_PX = 40
+BOTTOM_AXIS_PX = 60
+LEFT_MARGIN_PX = 60
+RIGHT_MARGIN_PX = 20
+
+# Layout heuristics (auto margins based on font sizes)
+BOTTOM_AXIS_TICK_MULT = 2.4
+BOTTOM_AXIS_TITLE_MULT = 1.6
+LEFT_MARGIN_TICK_MULT = 4.4
+LEFT_MARGIN_TITLE_MULT = 1.6
+AXIS_TITLE_STANDOFF_TICK_MULT = 1.1
+AXIS_TITLE_STANDOFF_MIN_PX = 10
+
+# ---- Legend sizing (web + export) ----
+LEGEND_ROW_HEIGHT_FACTOR = 2.0  # web estimate: row height ~= legend_font_size * factor
+LEGEND_PADDING_PX = 18  # extra padding used in legend height estimate and export margin
+WEB_LEGEND_EXTRA_PAD_PX = 20  # web-only safety pad to reduce last-row clipping
+WEB_LEGEND_MAX_HEIGHT_PX = 1000  # cap reserved web legend height
+AUTO_WIDTH_ESTIMATE_PX = 950  # used only when Plotly auto-sizes (legend row estimate)
+
+# ---- Performance / computation ----
+DEFAULT_SPLINE_SMOOTHING = 1.0
+SPLINE_SMOOTHING_MIN = 0.0
+SPLINE_SMOOTHING_MAX = 1.3
+SPLINE_SMOOTHING_STEP = 0.05
+XR_EPS = 1e-9  # treat |R| < XR_EPS as invalid for X/R
+XR_EPS_DISPLAY = "1e-9"  # shown in UI text (keep in sync with XR_EPS)
+
+# ---- Export ----
+EXPORT_IMAGE_SCALE = 4  # modebar + full-legend export
+EXPORT_DOM_ID_HASH_LEN = 12
+EXPORT_FALLBACK_COLOR = "#444"
+
+# Full-legend export (JS layout heuristics)
+EXPORT_LEGEND_ROW_HEIGHT_FACTOR = 1.25
+EXPORT_SAMPLE_LINE_MIN_PX = 18
+EXPORT_SAMPLE_LINE_MULT = 1.8
+EXPORT_SAMPLE_GAP_MIN_PX = 6
+EXPORT_SAMPLE_GAP_MULT = 0.6
+EXPORT_TEXT_PAD_MIN_PX = 8
+EXPORT_TEXT_PAD_MULT = 0.8
+EXPORT_LEGEND_TAIL_FONT_MULT = 0.35
+EXPORT_LEGEND_ROW_Y_OFFSET = 0.6
+EXPORT_COL_PADDING_MAX_PX = 12
+EXPORT_COL_PADDING_FRAC = 0.06
+
+# ---- App behavior ----
+UPLOAD_SHA1_PREFIX_LEN = 10
+CHECKBOX_KEY_HASH_LEN = 12
+
+# Zoom listener (JS bind loop and mount-time relayout ignore window)
+ZOOM_BIND_TRIES = 80
+ZOOM_BIND_INTERVAL_MS = 100
+ZOOM_IGNORE_AUTORANGE_MS = 1200
+
+# ---- Color shading (clustered color palette) ----
+COLOR_FALLBACK_RGB255 = (68, 68, 68)
+COLOR_LIGHTEN_MAX_T = 0.40
+COLOR_DARKEN_MAX_T = 0.25
 
 # Debug flag (code-only). When True, prints the latest relayout payload and stored zoom.
 DEBUG_ZOOM = False
@@ -72,6 +126,9 @@ def plotly_relayout_listener(
         debounce_ms=int(debounce_ms),
         nonce=int(nonce),
         reset_token=int(reset_token),
+        bind_tries=int(ZOOM_BIND_TRIES),
+        bind_interval_ms=int(ZOOM_BIND_INTERVAL_MS),
+        ignore_autorange_ms=int(ZOOM_IGNORE_AUTORANGE_MS),
         key=f"plotly_relayout_listener:{data_id}",
         default=None,
     )
@@ -97,7 +154,7 @@ def _note_upload_change() -> None:
         st.session_state.pop("uploaded_file_name", None)
         return
     try:
-        st.session_state["uploaded_file_sha1_10"] = hashlib.sha1(up.getvalue()).hexdigest()[:10]
+        st.session_state["uploaded_file_sha1_10"] = hashlib.sha1(up.getvalue()).hexdigest()[: int(UPLOAD_SHA1_PREFIX_LEN)]
         st.session_state["uploaded_file_name"] = getattr(up, "name", None)
     except Exception:
         st.session_state.pop("uploaded_file_sha1_10", None)
@@ -128,7 +185,7 @@ def _parse_color_to_rgb255(color: str) -> Tuple[int, int, int]:
     """
     c = str(color).strip()
     if not c:
-        return (68, 68, 68)
+        return tuple(int(v) for v in COLOR_FALLBACK_RGB255)
     if c.startswith("#"):
         return tuple(int(v) for v in pc.hex_to_rgb(c))
     if c.lower().startswith("rgb"):
@@ -141,7 +198,7 @@ def _parse_color_to_rgb255(color: str) -> Tuple[int, int, int]:
         if len(c2) == 3:
             c2 = "".join([ch * 2 for ch in c2])
         return tuple(int(v) for v in pc.hex_to_rgb(f"#{c2}"))
-    return (68, 68, 68)
+    return tuple(int(v) for v in COLOR_FALLBACK_RGB255)
 
 
 def _shade_hex(base_hex: str, position: float) -> str:
@@ -156,9 +213,9 @@ def _shade_hex(base_hex: str, position: float) -> str:
     p = float(max(-1.0, min(1.0, position)))
     if p >= 0:
         # Lighten
-        return _rgb_to_hex(_mix_rgb(base_rgb, (255, 255, 255), t=p * 0.40))
+        return _rgb_to_hex(_mix_rgb(base_rgb, (255, 255, 255), t=p * float(COLOR_LIGHTEN_MAX_T)))
     # Darken
-    return _rgb_to_hex(_mix_rgb(base_rgb, (0, 0, 0), t=(-p) * 0.25))
+    return _rgb_to_hex(_mix_rgb(base_rgb, (0, 0, 0), t=(-p) * float(COLOR_DARKEN_MAX_T)))
 
 
 def build_clustered_case_colors(cases: List[str], hue_part_override: Optional[int] = None) -> Dict[str, str]:
@@ -407,7 +464,7 @@ def split_case_parts(cases: List[str]) -> Tuple[List[List[str]], List[str]]:
 def _checkbox_key_map(col_key: str, options_disp: Tuple[str, ...]) -> Dict[str, str]:
     keys: Dict[str, str] = {}
     for o in options_disp:
-        h = hashlib.sha1(o.encode("utf-8")).hexdigest()[:12]
+        h = hashlib.sha1(o.encode("utf-8")).hexdigest()[: int(CHECKBOX_KEY_HASH_LEN)]
         keys[o] = f"{col_key}__opt__{h}"
     return keys
 
@@ -568,7 +625,12 @@ def apply_common_layout(
     bottom_axis_px = int(
         max(
             int(BOTTOM_AXIS_PX),
-            int(round(float(STYLE["tick_font_size_px"]) * 2.4 + float(STYLE["axis_title_font_size_px"]) * 1.6)),
+            int(
+                round(
+                    float(STYLE["tick_font_size_px"]) * float(BOTTOM_AXIS_TICK_MULT)
+                    + float(STYLE["axis_title_font_size_px"]) * float(BOTTOM_AXIS_TITLE_MULT)
+                )
+            ),
         )
     )
     est_width_px = int(figure_width_px) if not use_auto_width else int(AUTO_WIDTH_ESTIMATE_PX)
@@ -582,7 +644,12 @@ def apply_common_layout(
     left_margin_px = int(
         max(
             int(LEFT_MARGIN_PX),
-            int(round(float(STYLE["tick_font_size_px"]) * 4.4 + float(STYLE["axis_title_font_size_px"]) * 1.6)),
+            int(
+                round(
+                    float(STYLE["tick_font_size_px"]) * float(LEFT_MARGIN_TICK_MULT)
+                    + float(STYLE["axis_title_font_size_px"]) * float(LEFT_MARGIN_TITLE_MULT)
+                )
+            ),
         )
     )
 
@@ -627,13 +694,23 @@ def apply_common_layout(
 
     x_title_standoff = STYLE.get("xaxis_title_standoff_px")
     if x_title_standoff is None:
-        x_title_standoff = int(max(10, round(float(STYLE["tick_font_size_px"]) * 1.1)))
+        x_title_standoff = int(
+            max(
+                int(AXIS_TITLE_STANDOFF_MIN_PX),
+                round(float(STYLE["tick_font_size_px"]) * float(AXIS_TITLE_STANDOFF_TICK_MULT)),
+            )
+        )
     else:
         x_title_standoff = int(x_title_standoff)
 
     y_title_standoff = STYLE.get("yaxis_title_standoff_px")
     if y_title_standoff is None:
-        y_title_standoff = int(max(10, round(float(STYLE["tick_font_size_px"]) * 1.1)))
+        y_title_standoff = int(
+            max(
+                int(AXIS_TITLE_STANDOFF_MIN_PX),
+                round(float(STYLE["tick_font_size_px"]) * float(AXIS_TITLE_STANDOFF_TICK_MULT)),
+            )
+        )
     else:
         y_title_standoff = int(y_title_standoff)
     fig.update_xaxes(
@@ -674,7 +751,7 @@ def build_x_over_r_spline(df_r: Optional[pd.DataFrame], df_x: Optional[pd.DataFr
     xr_dropped = 0
     xr_total = 0
     f_series = None
-    eps = 1e-9
+    eps = float(XR_EPS)
     TraceCls = go.Scatter if enable_spline else go.Scattergl
     if df_r is not None and df_x is not None:
         cd, r_map = prepare_sheet_arrays(df_r)
@@ -719,7 +796,9 @@ def _render_client_png_download(
     legend_entrywidth: int,
     plot_index: int,
 ):
-    dom_id = hashlib.sha1(f"{filename}|{scale}|{plot_height}|{legend_entrywidth}|{plot_index}".encode("utf-8")).hexdigest()[:12]
+    dom_id = hashlib.sha1(f"{filename}|{scale}|{plot_height}|{legend_entrywidth}|{plot_index}".encode("utf-8")).hexdigest()[
+        : int(EXPORT_DOM_ID_HASH_LEN)
+    ]
     html = f"""
     <div id="exp-{dom_id}">
       <button id="btn-{dom_id}" style="padding:6px 10px; font-size: 0.9rem; cursor:pointer;">
@@ -756,7 +835,7 @@ def _render_client_png_download(
             gd?._fullLayout?.font?.size ||
             fallbackLegendFontSize;
           // Legend row height: keep tight to avoid bottom whitespace.
-          const legendRowH = Math.ceil(legendFontSize * 1.25);
+          const legendRowH = Math.ceil(legendFontSize * {float(EXPORT_LEGEND_ROW_HEIGHT_FACTOR)});
       const legendFontFamily = {json.dumps(STYLE["font_family"])};
       const legendFontColor = {json.dumps(STYLE["font_color"])};
 
@@ -764,7 +843,7 @@ def _render_client_png_download(
       const rightMargin = {int(RIGHT_MARGIN_PX)};
       const tickFontSize = {int(STYLE["tick_font_size_px"])};
       const axisTitleFontSize = {int(STYLE["axis_title_font_size_px"])};
-      const leftMarginPx = Math.max(leftMarginBase, Math.round(tickFontSize * 4.4 + axisTitleFontSize * 1.6));
+      const leftMarginPx = Math.max(leftMarginBase, Math.round(tickFontSize * {float(LEFT_MARGIN_TICK_MULT)} + axisTitleFontSize * {float(LEFT_MARGIN_TITLE_MULT)}));
 
           const data = Array.isArray(gd.data) ? gd.data : [];
           const data2 = data.map((tr) => {{
@@ -781,7 +860,7 @@ def _render_client_png_download(
               (tr.line && tr.line.color) ? tr.line.color :
               (tr.marker && tr.marker.color) ? tr.marker.color :
               (tr.meta && tr.meta.legend_color) ? tr.meta.legend_color :
-              "#444";
+              {json.dumps(EXPORT_FALLBACK_COLOR)};
             legendItems.push({{name, color}});
           }}
 
@@ -801,9 +880,9 @@ def _render_client_png_download(
             }}
           }} catch (e) {{}}
 
-          const sampleLinePx = Math.max(18, Math.round(1.8 * legendFontSize));
-          const sampleGapPx = Math.max(6, Math.round(0.6 * legendFontSize));
-          const textPadPx = Math.max(8, Math.round(0.8 * legendFontSize));
+          const sampleLinePx = Math.max({int(EXPORT_SAMPLE_LINE_MIN_PX)}, Math.round({float(EXPORT_SAMPLE_LINE_MULT)} * legendFontSize));
+          const sampleGapPx = Math.max({int(EXPORT_SAMPLE_GAP_MIN_PX)}, Math.round({float(EXPORT_SAMPLE_GAP_MULT)} * legendFontSize));
+          const textPadPx = Math.max({int(EXPORT_TEXT_PAD_MIN_PX)}, Math.round({float(EXPORT_TEXT_PAD_MULT)} * legendFontSize));
           const neededEntryPx = Math.ceil(sampleLinePx + sampleGapPx + maxTextW + textPadPx);
           const entryPx = Math.max(1, Math.max(legendEntryWidth, neededEntryPx));
 
@@ -811,7 +890,7 @@ def _render_client_png_download(
           const rows = Math.ceil(legendItems.length / cols);
           // Total legend area in bottom margin.
           // Add a small tail so the last row doesn't look cramped, but avoid large blank space.
-          const legendH = (rows * legendRowH) + legendPad + Math.ceil(0.35 * legendFontSize);
+          const legendH = (rows * legendRowH) + legendPad + Math.ceil({float(EXPORT_LEGEND_TAIL_FONT_MULT)} * legendFontSize);
 
           const newHeight = plotHeight + topMargin + bottomAxis + legendH;
           const newMarginB = bottomAxis + legendH;
@@ -841,14 +920,14 @@ def _render_client_png_download(
 
           // Spread columns across the available width to avoid side whitespace and tight columns.
           const colW = usableW / cols;
-          const xPadPx = Math.max(0, Math.min(12, Math.floor(colW * 0.06)));
+          const xPadPx = Math.max(0, Math.min({int(EXPORT_COL_PADDING_MAX_PX)}, Math.floor(colW * {float(EXPORT_COL_PADDING_FRAC)})));
 
           for (let i = 0; i < legendItems.length; i++) {{
             const row = Math.floor(i / cols);
             const col = i % cols;
             const x0 = (col * colW + xPadPx) / usableW;
             const x1 = x0 + (sampleLinePx / usableW);
-            const y = -(bottomAxis + legendPad + (row + 0.6) * legendRowH) / Math.max(1, plotHeight);
+            const y = -(bottomAxis + legendPad + (row + {float(EXPORT_LEGEND_ROW_Y_OFFSET)}) * legendRowH) / Math.max(1, plotHeight);
 
             shp.push({{
               type: "line",
@@ -971,13 +1050,13 @@ def main():
             prev_smooth_f = float(prev_smooth)
         except Exception:
             prev_smooth_f = float(DEFAULT_SPLINE_SMOOTHING)
-        prev_smooth_f = max(0.0, min(1.3, prev_smooth_f))
+        prev_smooth_f = max(float(SPLINE_SMOOTHING_MIN), min(float(SPLINE_SMOOTHING_MAX), prev_smooth_f))
         smooth = st.sidebar.slider(
             "Spline smoothing",
-            min_value=0.0,
-            max_value=1.3,
+            min_value=float(SPLINE_SMOOTHING_MIN),
+            max_value=float(SPLINE_SMOOTHING_MAX),
             value=prev_smooth_f,
-            step=0.05,
+            step=float(SPLINE_SMOOTHING_STEP),
             key="spline_smoothing",
         )
 
@@ -1188,7 +1267,7 @@ def main():
     # Render
     st.subheader(f"Sequence: {seq_label} | Base: {int(f_base)} Hz")
     if show_plot_xr and xr_total > 0 and xr_dropped > 0:
-        st.caption(f"X/R: dropped {xr_dropped} of {xr_total} points where |R| < 1e-9 or data missing.")
+        st.caption(f"X/R: dropped {xr_dropped} of {xr_total} points where |R| < {XR_EPS_DISPLAY} or data missing.")
 
     export_scale = int(EXPORT_IMAGE_SCALE)
     with download_area:
