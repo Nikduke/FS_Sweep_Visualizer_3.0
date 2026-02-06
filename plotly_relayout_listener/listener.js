@@ -747,12 +747,12 @@ def build_x_over_r_spline(df_r: Optional[pd.DataFrame], df_x: Optional[pd.DataFr
                           strip_location_suffix: bool, use_auto_width: bool, figure_width_px: int,
                           case_colors: Dict[str, str]
                           ) -> Tuple[go.Figure, Optional[pd.Series], int, int]:
+    fig = go.Figure()
     xr_dropped = 0
     xr_total = 0
     f_series = None
     eps = float(XR_EPS)
     TraceCls = go.Scatter if enable_spline else go.Scattergl
-    traces: List[BaseTraceType] = []
     if df_r is not None and df_x is not None:
         cd, r_map = prepare_sheet_arrays(df_r)
         _cd2, x_map = prepare_sheet_arrays(df_x)
@@ -782,29 +782,10 @@ def build_x_over_r_spline(df_r: Optional[pd.DataFrame], df_x: Optional[pd.DataFr
             )
             if enable_spline and isinstance(tr, go.Scatter):
                 tr.update(line=dict(shape="spline", smoothing=float(smooth), simplify=False, color=color))
-            traces.append(tr)
-    fig = go.Figure(data=traces)
+            fig.add_trace(tr)
     y_title = "X1/R1 (unitless)" if seq_label == "Positive" else "X0/R0 (unitless)"
     apply_common_layout(fig, plot_height, y_title, legend_entrywidth, len(fig.data), use_auto_width, figure_width_px)
     return fig, f_series, xr_dropped, xr_total
-
-
-def _make_plot_item(
-    kind: str,
-    fig: go.Figure,
-    f_ref: Optional[pd.Series],
-    filename: str,
-    button_label: str,
-    chart_key: str,
-) -> Dict[str, object]:
-    return {
-        "kind": str(kind),
-        "fig": fig,
-        "f_ref": f_ref,
-        "filename": str(filename),
-        "button_label": str(button_label),
-        "chart_key": str(chart_key),
-    }
 
 
 def _render_client_png_download(
@@ -1209,7 +1190,16 @@ def main():
             figure_width_px,
             case_colors,
         )
-        plot_items.append(_make_plot_item("x", fig_x, f_x, "X_full_legend.png", "X\nPNG", "plot_x"))
+        plot_items.append(
+            {
+                "kind": "x",
+                "fig": fig_x,
+                "f_ref": f_x,
+                "filename": "X_full_legend.png",
+                "button_label": "X\nPNG",
+                "chart_key": "plot_x",
+            }
+        )
 
     if show_plot_r:
         fig_r, f_r = build_plot_spline(
@@ -1226,7 +1216,16 @@ def main():
             figure_width_px,
             case_colors,
         )
-        plot_items.append(_make_plot_item("r", fig_r, f_r, "R_full_legend.png", "R\nPNG", "plot_r"))
+        plot_items.append(
+            {
+                "kind": "r",
+                "fig": fig_r,
+                "f_ref": f_r,
+                "filename": "R_full_legend.png",
+                "button_label": "R\nPNG",
+                "chart_key": "plot_r",
+            }
+        )
 
     if show_plot_xr:
         fig_xr, f_xr, xr_dropped, xr_total = build_x_over_r_spline(
@@ -1244,7 +1243,16 @@ def main():
             figure_width_px,
             case_colors,
         )
-        plot_items.append(_make_plot_item("xr", fig_xr, f_xr, "X_over_R_full_legend.png", "X/R\nPNG", "plot_xr"))
+        plot_items.append(
+            {
+                "kind": "xr",
+                "fig": fig_xr,
+                "f_ref": f_xr,
+                "filename": "X_over_R_full_legend.png",
+                "button_label": "X/R\nPNG",
+                "chart_key": "plot_xr",
+            }
+        )
 
     f_refs = [it["f_ref"] for it in plot_items if it.get("f_ref") is not None]
     n_lo, n_hi = compute_common_n_range(f_refs, f_base)
