@@ -590,8 +590,24 @@ function syncAxisResetBaseline(gd, axisName, rangeVals) {
   } catch (e) {}
 }
 
+function toArrayLike(val) {
+  if (Array.isArray(val)) return val;
+  if (val == null) return [];
+  try {
+    if (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView && ArrayBuffer.isView(val)) {
+      return Array.from(val);
+    }
+  } catch (e) {}
+  if (typeof val === "object" && Number.isFinite(Number(val.length)) && Number(val.length) >= 0) {
+    try {
+      return Array.from(val);
+    } catch (e) {}
+  }
+  return [];
+}
+
 function extractFrequencyHzArrayFromLineTrace(tr, fallbackBaseHz) {
-  const cds = Array.isArray(tr && tr.customdata) ? tr.customdata : [];
+  const cds = toArrayLike(tr && tr.customdata);
   if (cds.length) {
     const out = [];
     let finiteCount = 0;
@@ -610,7 +626,7 @@ function extractFrequencyHzArrayFromLineTrace(tr, fallbackBaseHz) {
     }
   }
 
-  const xs = Array.isArray(tr && tr.x) ? tr.x : [];
+  const xs = toArrayLike(tr && tr.x);
   if (xs.length) {
     const fb = Number.isFinite(Number(fallbackBaseHz)) && Number(fallbackBaseHz) > 0 ? Number(fallbackBaseHz) : 50.0;
     const out = [];
